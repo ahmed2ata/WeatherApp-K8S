@@ -1,0 +1,66 @@
+1- first creating a kind cluster that enables ingress by: 
+cat <<EOF | kind create cluster --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+EOF
+Then: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+2- Deploying the MySQL database:
+
+ a- kubectl apply -f headless-service
+ b- kubectl create secret generic mysql-secret \
+     --from-literal=root-password='secure-root-pw' \
+     --from-literal=auth-password='my-secret-pw' \
+     --from-literal=secret-key='xco0sr0fh4e52x03g9mv'
+ c- kubectl apply -f statefulset.yaml
+ d- kubectl apply -f init-job.yaml
+
+to test , kubectl exec -it mysql-0 -- mysql -u authuser -pmy-secret-pw
+          SHOW DATABASES;
+          USE weatherapp;
+
+3- Deploying the Authentication service:   
+ a- kubectl apply -f auth-deployment.yaml
+ b- kubectl apply -f service.yaml
+
+to test , kubectl run alpine --rm -it --image=alpine -- sh
+          apk add curl
+          curl -X POST http://weatherapp-auth:8080/users \
+           -H "Content-Type: application/json" \
+           -d '{"username": "testuser", "password": "testpassword"}'
+# Should return {"success":"User added successfully"}
+
+4- Weather client service:
+ a- first get an apikey for the weather client from rapidapi.com after sign in throw this link "https://rapidapi.com/weatherapi/api/weatherapi-com/"
+ b- kubectl create secret generic weather --from-literal=apikey=fdc011dc13msh9e8388edb5da5dfp155349jsnf0d08c36e36b
+ c- kubectl apply -f auth-deployment.yaml
+ d- kubectl apply -f service.yaml
+to test, kubectl run alpine --rm -it --image=alpine -- sh
+        apk add curl
+        curl weatherapp-weather:5000 # Should return "the service is running"
+        curl weatherapp-weather:5000/cairo # Should return the correct response 
+
+5- Ui service:
+ a- openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=weatherapp.local/O=weatherapp"
+ b- kubectl create secret tls weatherapp-ui-tls --cert=tls.crt --key=tls.key
+ c- kubectl apply -f deployments.yaml
+ d- kubectl apply -f service.yaml
+ f- kubectl apply -f ingress.yaml
+
+
+finally: in vim /etc/hosts : your_ip     weatherapp.local
